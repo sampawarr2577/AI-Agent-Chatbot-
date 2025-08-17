@@ -67,6 +67,23 @@ async def root():
         "docs": "/docs"
     }
 
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "AI Document QA Agent API",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+@app.get("/health")
+async def health_check(vector_service: VectorService = Depends(get_vector_service)):
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "service": "AI Document QA Agent",
+        "documents_count": vector_service.get_document_count() if vector_service else 0
+    }
 
 @app.post("/documents/upload", response_model= DocumentResponse)
 async def upload_document(background_tasks: BackgroundTasks,
