@@ -15,10 +15,13 @@ from doctr.io import DocumentFile
 from doctr.models import ocr_predictor
 from ocrmypdf.hocrtransform import HocrTransform
 from pypdf import PdfWriter, PdfReader
+from langchain.docstore.document import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
 class DocumentService:
     def __init__(self):
-        pass
+        # Ensure upload directory exists
+        os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
 
     async def process_document(self, file_content:bytes, filename:str) -> Dict[str,Any]:
         """Process uploaded document"""
@@ -33,18 +36,33 @@ class DocumentService:
         file_extension = Path(filename).suffix.lower()
         temp_file_path = self.save_temp_file(file_content, file_extension)
 
-        try:
-            if file_extension == ".pdf":
-                md_text_content = self.process_pdf(temp_file_path)
+        if file_extension == ".pdf":
+            md_text_content = self.process_pdf(temp_file_path)
+        elif file_extension == '.docx':
+            md_text_content= self.get_markdown(temp_file_path)
+        elif file_extension == '.txt':
+            md_text_content = self.get_markdown(temp_file_path)
+        elif file_extension == '.xlsx':
+            md_text_content = self.get_markdown(temp_file_path)
+        else:
+            raise ValueError(f"Unsupported file type: {file_extension}")
+        
+        #generate document ID
+        document_id = str(uuid.uuid4())
 
-            else:
-                raise ValueError (f"Unsupported file type: {file_extension}")
-            
+        # create text chunks
+        logger.info(f"Markdown text content is {md_text_content}")
+        md_text_content = md_text_content[0].page_content
+        chunks = self.create_text_chunks(md_text_content,document_id,filename)
 
-            return {
-                "filename":filename,
-            }
+        return {
+            "document_id": document_id,
+            "filename":filename,
+            "chunks" : chunks,
+            "total_chunks": len(chunks),
+            "md_text": md_text_content
 
+        }
 
     def save_temp_file(self, file_content:bytes, extension:str) -> str:
         """save uploaded file to temporary location"""
@@ -65,7 +83,7 @@ class DocumentService:
         docs = loader.load()
         return docs
         
-    def is_scanned_pdf(pdf_path:str)-> bool:
+    def is_scanned_pdf(self,pdf_path:str)-> bool:
         """
         Detect if a PDF is scanned (image-based) or contains selectable text.
         Returns True if scanned, False otherwise.
@@ -74,8 +92,11 @@ class DocumentService:
         for page in pdf:
             text = page.get_text()
             if text.strip():
+                logger.info(f"This is not scanned pdf {pdf_path}")
                 return False  # Found actual text → Not scanned
+        logger.info(f"This is scanned pdf {pdf_path}")
         return True
+        
     
     def process_pdf(self, file_path:str)-> str:
         """Process pdf to extract markdown text from it"""
@@ -142,8 +163,11 @@ class DocumentService:
             writer.write(f)
 
 
-    def ocr_and_replace_pdf(self,pdf_path: str, dpi: int = 300) -> None:
-        """Run OCR on scanned PDF using docTR, create a searchable PDF, and replace the original."""
+    def ocr_and_replace_pdf(self, pdf_path: str, dpi: int = 300) -> str:
+        """
+        Run OCR on scanned PDF using docTR, create a searchable PDF,
+        and overwrite the input file with the new searchable version.
+        """
         if not os.path.exists(pdf_path):
             raise FileNotFoundError(f"Input PDF not found: {pdf_path}")
 
@@ -159,7 +183,7 @@ class DocumentService:
         # 3) Export per-page hOCR/XML
         xml_pages: List[Tuple[bytes, object]] = result.export_as_xml()
 
-        # 4) Render pages to images (no pre-opened files)
+        # 4) Render pages to images
         page_images = self._render_pdf_pages_to_images(pdf_path, dpi=dpi)
 
         if len(xml_pages) != len(page_images):
@@ -169,17 +193,17 @@ class DocumentService:
 
         single_page_outputs: List[str] = []
         hocr_files: List[str] = []
+        merged_pdf_tmp = self._unique_tmp_path(".pdf")  # temp final PDF path
+
         try:
             # 5) Build searchable single-page PDFs
             for i, (xml_bytes, _xml_tree) in enumerate(xml_pages):
-                # Write hOCR to a path (not an open file handle)
                 hocr_path = self._unique_tmp_path(".hocr")
                 with open(hocr_path, "wb") as hf:
                     hf.write(xml_bytes)
                 hocr_files.append(hocr_path)
 
                 out_pdf_path = self._unique_tmp_path(".pdf")
-
                 hocr = HocrTransform(hocr_filename=hocr_path, dpi=float(dpi))
                 hocr.to_pdf(
                     out_filename=out_pdf_path,
@@ -187,28 +211,52 @@ class DocumentService:
                 )
                 single_page_outputs.append(out_pdf_path)
 
-            # 6) Merge to final
-            merged_pdf_path = self._unique_tmp_path(".pdf")
-            self._merge_pdfs(single_page_outputs, merged_pdf_path)
+            # 6) Merge all single-page PDFs into a temporary final file
+            self._merge_pdfs(single_page_outputs, merged_pdf_tmp)
 
-            # 7) Replace original atomically
-            os.replace(merged_pdf_path, pdf_path)
-            logger.info(f"OCR complete. Replaced original file: {pdf_path}")
+            # 7) Atomically replace the original with OCR result
+            os.replace(merged_pdf_tmp, pdf_path)
+
+            logger.info(f"OCR complete. Searchable PDF overwritten at: {pdf_path}")
+            return pdf_path
 
         finally:
-            # Cleanup temps. Ensure nothing holds open handles to these paths.
-            for p in page_images:
+            # Cleanup temporary files but never touch the final pdf_path
+            for p in page_images + single_page_outputs + hocr_files:
                 try:
                     os.remove(p)
                 except Exception:
                     pass
-            for p in single_page_outputs:
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
-            for p in hocr_files:
-                try:
-                    os.remove(p)
-                except Exception:
-                    pass
+
+    def create_text_chunks(self,text_content:str,document_id:str,filename:str)-> List[Document]:
+        """This method is used to convert text into chunks if there are text + tables"""
+
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size = settings.CHUNK_SIZE,
+            chunk_overlap = settings.CHUNK_OVERLAP,
+            separators= ["\n\n","\n"," ",""]
+        )
+    
+        if not text_content.strip():
+            return []
+        
+        # Split text into chunks
+        chunks = text_splitter.split_text(text_content)
+        
+        documents = []
+        for i, chunk in enumerate(chunks):
+            if chunk.strip():  # Only add non-empty chunks
+                doc = Document(
+                    page_content=chunk,
+                    metadata={
+                        'document_id': document_id,
+                        'filename': filename,
+                        'chunk_index': i,
+                        'chunk_type': 'text',
+                        'chunk_id': f"{document_id}_text_{i}"
+                    }
+                )
+                documents.append(doc)
+        
+        return documents
+    

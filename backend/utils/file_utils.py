@@ -3,7 +3,7 @@ from typing import List
 from pathlib import Path
 from utils.logger import logger
 
-ALLOWED_EXTENSIONS = {".pdf",".txt",".docx"}
+ALLOWED_EXTENSIONS = {".pdf",".txt",".docx",".xlsx"}
 
 def validate_file_type(filename:str)-> bool:
     """Check if file type is supported"""

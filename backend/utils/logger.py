@@ -1,32 +1,43 @@
+# logger.py
 from loguru import logger
 import sys
 from pathlib import Path
 
 logger.remove()
 
-# Console logging
-logger.add(
-    sys.stdout,
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | "
-           "<level>{level: <8}</level> | "
-           "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-           "<level>{message}</level>",
-    level="DEBUG",  
-    colorize=True
+CONSOLE_FORMAT = (
+    "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+    "<level>{level: <8}</level> | "
+    "<cyan>{module}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> "
+    "({file.path}) - <level>{message}</level>"
 )
 
-# File logging
+FILE_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+    "{module}:{function}:{line} ({file.path}) - {message}"
+)
+
 log_dir = Path("logs")
 log_dir.mkdir(exist_ok=True)
 
 logger.add(
-    log_dir / "app.log",
-    rotation="10 MB",      
-    retention="10 days",    
-    compression="zip",      
+    sys.stdout,
+    format=CONSOLE_FORMAT,
     level="DEBUG",
-    format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+    colorize=True,
+    backtrace=True,   # important
+    diagnose=True,    # shows local variables in traceback
 )
 
-# Export logger so other modules can use it
+logger.add(
+    log_dir / "app.log",
+    rotation="10 MB",
+    retention="10 days",
+    compression="zip",
+    level="DEBUG",
+    format=FILE_FORMAT,
+    backtrace=True,
+    diagnose=True,
+)
+
 __all__ = ["logger"]
