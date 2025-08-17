@@ -60,37 +60,40 @@ class VectorService:
         """Perform similarity search"""
         if self.index is None or self.index.ntotal == 0:
             return []
-        
+
         try:
             # Generate query embedding
             query_embedding = await self.embedding_service.embed_query(query)
-            query_vector = np.array([query_embedding]).astype('float32')
+            query_vector = np.array([query_embedding], dtype='float32')
             
             # Search in FAISS index
-            scores, indices = self.index.search(query_vector, min(k, self.index.ntotal))
-            
+            distances, all_indices = self.index.search(query_vector, min(k, self.index.ntotal))
+            scores = distances[0]       # shape (k,)
+            indices = all_indices    # shape (k,)
+
             results = []
-            for score, idx in zip(scores[0], indices):
-                if idx < len(self.documents) and idx >= 0:
+            for score, idx in zip(scores, indices):
+                idx = int(idx)  # convert to native Python int
+                if 0 <= idx < len(self.documents):
                     doc = self.documents[idx]
-                    
+
                     # Apply filters if provided
-                    if filters:
-                        if not self._matches_filters(doc.metadata, filters):
-                            continue
-                    
+                    if filters and not self._matches_filters(doc.metadata, filters):
+                        continue
+
                     results.append({
                         'document': doc,
                         'similarity_score': float(score),
                         'content': doc.page_content,
                         'metadata': doc.metadata
                     })
-            
+
             return results
-            
+
         except Exception as e:
             print(f"Error performing similarity search: {e}")
             return []
+
     
     def _matches_filters(self, metadata: Dict, filters: Dict) -> bool:
         """Check if document metadata matches the provided filters"""

@@ -8,10 +8,14 @@ from config import settings
 from services.vector_service import VectorService
 from contextlib import asynccontextmanager
 import os
+import uuid
+from services.chat_service import ChatService
+from models.chat import ChatRequest,ChatResponse
 
 # Global service instances
 vector_service = None
 document_service = None
+chat_service = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -25,6 +29,9 @@ async def lifespan(app: FastAPI):
     # Initialize services
     app.state.vector_service = VectorService()
     app.state.document_service = DocumentService()
+    app.state.chat_service = ChatService(app.state.vector_service)
+
+    logger.info(f"Application started with {app.state.vector_service.get_document_count()} documents in vector store")
     
     yield
     
@@ -44,6 +51,9 @@ def get_vector_service(request: Request) -> VectorService:
 
 def get_document_service(request: Request) -> DocumentService:
     return request.app.state.document_service
+
+def get_chat_service(request: Request) -> ChatService:
+    return request.app.state.chat_service
 
 app.add_middleware(
     CORSMiddleware,
@@ -92,6 +102,41 @@ async def upload_document(background_tasks: BackgroundTasks,
     except Exception as e:
         logger.error(f"Error processing document: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+@app.post("/chat", response_model=ChatResponse)
+async def chat(
+    request: ChatRequest,
+    chat_service: ChatService = Depends(get_chat_service),
+):
+    """Process chat query using RAG"""
+
+    try:
+        # Use the vector_service stored inside chat_service
+        if chat_service.vector_service.get_document_count() == 0:
+            return ChatResponse(
+                answer="I don't have any documents to search through. Please upload some documents first.",
+                sources=[],
+                session_id=request.session_id or str(uuid.uuid4()),
+                success=False,
+                error_message="No documents available"
+            )
+
+        result = await chat_service.get_response(
+            message=request.message,
+            session_id=request.session_id
+        )
+
+        return ChatResponse(**result)
+
+    except Exception as e:
+        logger.exception("Error in chat endpoint")
+        return ChatResponse(
+            answer=f"I apologize, but I encountered an error: {e}",
+            sources=[],
+            session_id=request.session_id or str(uuid.uuid4()),
+            success=False,
+            error_message=str(e)
+        )
 
 
 if __name__ == "__main__":
