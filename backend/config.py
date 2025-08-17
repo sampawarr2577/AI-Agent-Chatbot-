@@ -21,6 +21,7 @@ class Settings:
     # Chunking Settings
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
+    ROWS_PER_CHUNK: int = 50
     
     # Vector Search Settings
     VECTOR_SEARCH_TOP_K: int = 5

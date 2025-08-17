@@ -34,27 +34,31 @@ class DocumentService:
             raise ValueError(f"File size ({file_size_mb:.1f}MB) exceeds maximum allowed size({settings.MAX_FILE_SIZE_MB}MB)")
         
         file_extension = Path(filename).suffix.lower()
+        logger.info(f"The extension of file: {filename} is {file_extension}")
         temp_file_path = self.save_temp_file(file_content, file_extension)
 
-        if file_extension == ".pdf":
-            md_text_content = self.process_pdf(temp_file_path)
-        elif file_extension == '.docx':
-            md_text_content= self.get_markdown(temp_file_path)
-        elif file_extension == '.txt':
-            md_text_content = self.get_markdown(temp_file_path)
-        elif file_extension == '.xlsx':
-            md_text_content = self.get_markdown(temp_file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_extension}")
-        
         #generate document ID
         document_id = str(uuid.uuid4())
 
-        # create text chunks
-        logger.info(f"Markdown text content is {md_text_content}")
-        md_text_content = md_text_content[0].page_content
-        chunks = self.create_text_chunks(md_text_content,document_id,filename)
-
+        if file_extension == ".pdf":
+            md_text_content = self.process_pdf(temp_file_path)
+            md_text_content = md_text_content[0].page_content
+            chunks = self.create_text_chunks(md_text_content,document_id,filename)
+        elif file_extension == '.docx':
+            md_text_content= self.get_markdown(temp_file_path)
+            md_text_content = md_text_content[0].page_content
+            chunks = self.create_text_chunks(md_text_content,document_id,filename)
+        elif file_extension == '.txt':
+            md_text_content = self.get_markdown(temp_file_path)
+            md_text_content = md_text_content[0].page_content
+            chunks = self.create_text_chunks(md_text_content,document_id,filename)
+        elif file_extension == '.xlsx':
+            md_text_content = self.get_markdown(temp_file_path)
+            md_text_content = md_text_content[0].page_content
+            chunks = self.split_markdown_table_by_rows(md_text_content,document_id,filename,settings.ROWS_PER_CHUNK)
+        else:
+            raise ValueError(f"Unsupported file type: {file_extension}")
+    
         return {
             "document_id": document_id,
             "filename":filename,
@@ -260,3 +264,53 @@ class DocumentService:
         
         return documents
     
+    def split_markdown_table_by_rows(self,
+        text_content: str,
+        document_id:str,
+        filename:str,
+        rows_per_chunk: int = 50,
+        keep_header_in_each_chunk: bool = True,
+    ) -> List[Document]:
+        """
+        Split a Markdown table into row-based chunks.
+        standard Markdown table has:
+        - line 0: header row (pipe-separated)
+        - line 1: delimiter row (---|---)
+        - lines 2..N: data rows
+        """
+        logger.info("In a split markdown table by rows")
+        logger.info(f"The data type of text_content is {type(text_content)}")
+        lines = [ln for ln in text_content.strip().splitlines() if ln.strip() != ""]
+        logger.info("Below lines line 282")
+        if len(lines) < 2:
+            # Not a valid table; return as single document
+            return [Document(page_content=text_content, metadata={"split": "none"})]
+
+        header = lines[0]
+        delimiter = lines[1]
+        data_rows = lines[2:]
+
+        if not data_rows:
+            return [Document(page_content="\n".join([header, delimiter]), metadata={"split": "header_only"})]
+
+        chunks: List[Document] = []
+        for start in range(0, len(data_rows), rows_per_chunk):
+            block = data_rows[start:start + rows_per_chunk]
+            if keep_header_in_each_chunk:
+                content = "\n".join([header, delimiter] + block)
+            else:
+                content = "\n".join(block)
+
+            metadata = {
+                "document_id":document_id,
+                "filename": filename,
+                "chunk_type": "table_type",
+                'chunk_id': f"{document_id}_text_{start}",
+                "chunk_index":start,
+                "row_start": start,
+                "row_end": start + len(block) - 1,
+                "rows_per_chunk": rows_per_chunk,
+            }
+            chunks.append(Document(page_content=content, metadata=metadata))
+
+        return chunks
