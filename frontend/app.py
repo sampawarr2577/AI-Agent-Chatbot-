@@ -154,7 +154,7 @@ with st.sidebar:
     st.subheader("Upload Document")
     uploaded_file = st.file_uploader(
         "Choose a document",
-        type=['pdf', 'txt', 'docx'],
+        type=['pdf', 'txt', 'docx',"xlsx"],
         help="Upload PDF, text, or Word documents (max 50MB)",
         key="file_uploader"
     )
