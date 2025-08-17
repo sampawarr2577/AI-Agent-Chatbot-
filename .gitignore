@@ -206,3 +206,9 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 experiments
+
+data/uploads/*
+!data/uploads/.gitkeep
+
+data/vector_store/*
+!data/vector_store/.gitkeep

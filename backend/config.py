@@ -1,7 +1,10 @@
 import os
-from dotenv import load_dotenv
+from pathlib import Path
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+# Load the .env file from the root directory
+dotenv_path = find_dotenv()
+load_dotenv(dotenv_path)
 
 class Settings:
     # OpenAI Configuration

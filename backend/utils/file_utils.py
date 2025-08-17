@@ -13,7 +13,9 @@ def validate_file_type(filename:str)-> bool:
     
 def get_file_size(file_path:str)-> int:
     """Get file size in bytes"""
-    return os.path.getsize(file_path)
+    file_size = os.path.getsize(file_path)
+    logger.info(f"file size is {file_size}")
+    return file_size
 
 def ensure_directory_exists(directory_path:str)-> None:
     """Create directory if it doesn't exist"""

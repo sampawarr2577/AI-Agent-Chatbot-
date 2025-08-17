@@ -34,11 +34,11 @@ class DocumentService:
             raise ValueError(f"File size ({file_size_mb:.1f}MB) exceeds maximum allowed size({settings.MAX_FILE_SIZE_MB}MB)")
         
         file_extension = Path(filename).suffix.lower()
-        logger.info(f"The extension of file: {filename} is {file_extension}")
         temp_file_path = self.save_temp_file(file_content, file_extension)
 
         #generate document ID
         document_id = str(uuid.uuid4())
+        logger.info(f"Document id generated for the current document: {document_id}")
 
         if file_extension == ".pdf":
             md_text_content = self.process_pdf(temp_file_path)
@@ -58,14 +58,14 @@ class DocumentService:
             chunks = self.split_markdown_table_by_rows(md_text_content,document_id,filename,settings.ROWS_PER_CHUNK)
         else:
             raise ValueError(f"Unsupported file type: {file_extension}")
-    
+
+        logger.info(f"Extracting markdown text and chunking is completed for current file{filename}")
+        logger.info(f"chunking completed total chunks are {len(chunks)}")
         return {
             "document_id": document_id,
             "filename":filename,
             "chunks" : chunks,
-            "total_chunks": len(chunks),
-            "md_text": md_text_content
-
+            "total_chunks": len(chunks)
         }
 
     def save_temp_file(self, file_content:bytes, extension:str) -> str:
@@ -278,10 +278,7 @@ class DocumentService:
         - line 1: delimiter row (---|---)
         - lines 2..N: data rows
         """
-        logger.info("In a split markdown table by rows")
-        logger.info(f"The data type of text_content is {type(text_content)}")
         lines = [ln for ln in text_content.strip().splitlines() if ln.strip() != ""]
-        logger.info("Below lines line 282")
         if len(lines) < 2:
             # Not a valid table; return as single document
             return [Document(page_content=text_content, metadata={"split": "none"})]

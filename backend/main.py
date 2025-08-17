@@ -1,17 +1,49 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from models.document import DocumentResponse
 from services.document_service import DocumentService
 from utils.logger import logger
 import uvicorn 
 from config import settings
+from services.vector_service import VectorService
+from contextlib import asynccontextmanager
+import os
 
+# Global service instances
+vector_service = None
+document_service = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    global vector_service, document_service
+    
+    # Ensure data directories exist
+    os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(settings.VECTOR_STORE_PATH, exist_ok=True)
+    
+    # Initialize services
+    app.state.vector_service = VectorService()
+    app.state.document_service = DocumentService()
+    
+    yield
+    
+    # Shutdown
+    print("Application shutting down...")
 
 app = FastAPI(
     title= "AI Document QA Agent",
     description= "Intelligent document Question-Answering system using RAG with support for text and tables",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan= lifespan
 )
+
+# Dependency functions
+def get_vector_service(request: Request) -> VectorService:
+    return request.app.state.vector_service
+
+def get_document_service(request: Request) -> DocumentService:
+    return request.app.state.document_service
 
 app.add_middleware(
     CORSMiddleware,
@@ -21,19 +53,41 @@ app.add_middleware(
     allow_headers = ["*"]
 )
 
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {
+        "message": "AI Document QA Agent API",
+        "version": "1.0.0",
+        "docs": "/docs"
+    }
+
+
 @app.post("/documents/upload", response_model= DocumentResponse)
-async def upload_document(file: UploadFile = File(...,description="upload file to process of pdf, txt, docx format")):
+async def upload_document(background_tasks: BackgroundTasks,
+                          file: UploadFile = File(...,description="upload file to process of pdf, txt, docx format"),
+                          document_service: DocumentService = Depends(get_document_service),
+                          vector_service: VectorService = Depends(get_vector_service)):
     """ upload and process document for QA"""
     try:
         file_content = await file.read()
-        document_service = DocumentService()
         result = await document_service.process_document(file_content, file.filename)
 
-        return DocumentResponse(
-            filename = result["filename"],
-            status = "Processed",
-            message = "Document uploaded successfully"
+        # Add chunks to vector store in background
+        background_tasks.add_task(
+            vector_service.add_documents,
+            result["chunks"]
         )
+
+        return DocumentResponse(
+            document_id = result["document_id"],
+            filename = result["filename"],
+            total_chunks=result["total_chunks"],
+            status = "Processed",
+            message = "Document successfully processed and indexed"
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     
     except Exception as e:
         logger.error(f"Error processing document: {e}")
