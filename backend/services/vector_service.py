@@ -68,8 +68,10 @@ class VectorService:
             
             # Search in FAISS index
             distances, all_indices = self.index.search(query_vector, min(k, self.index.ntotal))
-            scores = distances[0]       # shape (k,)
-            indices = all_indices    # shape (k,)
+            
+            # FAISS returns 2D arrays, we take the first row (single query)
+            scores = distances[0]        # shape (k,)
+            indices = all_indices[0]     # shape (k,)
 
             results = []
             for score, idx in zip(scores, indices):
@@ -83,7 +85,7 @@ class VectorService:
 
                     results.append({
                         'document': doc,
-                        'similarity_score': float(score),
+                        'similarity_score': float(score),  # ensure scalar
                         'content': doc.page_content,
                         'metadata': doc.metadata
                     })
@@ -94,7 +96,7 @@ class VectorService:
             print(f"Error performing similarity search: {e}")
             return []
 
-    
+
     def _matches_filters(self, metadata: Dict, filters: Dict) -> bool:
         """Check if document metadata matches the provided filters"""
         for key, value in filters.items():

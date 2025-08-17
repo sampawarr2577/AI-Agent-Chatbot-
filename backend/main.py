@@ -1,6 +1,6 @@
 from fastapi import FastAPI, File, UploadFile, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from models.document import DocumentResponse
+from models.document import DocumentResponse, DocumentDeleteResponse, DocumentList
 from services.document_service import DocumentService
 from utils.logger import logger
 import uvicorn 
@@ -11,11 +11,6 @@ import os
 import uuid
 from services.chat_service import ChatService
 from models.chat import ChatRequest,ChatResponse
-
-# Global service instances
-vector_service = None
-document_service = None
-chat_service = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -137,6 +132,83 @@ async def chat(
             success=False,
             error_message=str(e)
         )
+
+@app.get("/documents", response_model=DocumentList)
+async def list_documents(vector_service: VectorService = Depends(get_vector_service)):
+    """List all processed documents"""
+    try:
+        # Get unique documents from vector store
+        documents_info = {}
+        
+        for doc in vector_service.documents:
+            doc_id = doc.metadata['document_id']
+            filename = doc.metadata['filename']
+            
+            if doc_id not in documents_info:
+                documents_info[doc_id] = {
+                    'document_id': doc_id,
+                    'filename': filename,
+                    'total_chunks': 0,
+                    'text_chunks': 0,
+                    'table_chunks': 0
+                }
+            
+            documents_info[doc_id]['total_chunks'] += 1
+            
+            if doc.metadata.get('chunk_type') == 'table':
+                documents_info[doc_id]['table_chunks'] += 1
+            else:
+                documents_info[doc_id]['text_chunks'] += 1
+        
+        documents_list = list(documents_info.values())
+        
+        return DocumentList(
+            documents=documents_list,
+            total=len(documents_list)
+        )
+        
+    except Exception as e:
+        print(f"Error listing documents: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/documents/{document_id}", response_model=DocumentDeleteResponse)
+async def delete_document(document_id: str,
+                          vector_service: VectorService = Depends(get_vector_service)):
+    """Delete a specific document from the system"""
+    try:
+        result = vector_service.clear_documents(document_id)
+        
+        return DocumentDeleteResponse(
+            document_id=document_id,
+            message=result,
+            success=True
+        )
+        
+    except Exception as e:
+        print(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/sessions/{session_id}")
+async def get_session_info(session_id: str,
+                           chat_service: ChatService = Depends(get_chat_service)):
+    """Get information about a chat session"""
+    session_info = chat_service.get_session_info(session_id)
+    
+    if session_info:
+        return session_info
+    else:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+@app.delete("/sessions/{session_id}")
+async def clear_session(session_id: str,
+                        chat_service: ChatService = Depends(get_chat_service)):
+    """Clear a specific chat session"""
+    success = chat_service.clear_session(session_id)
+    
+    if success:
+        return {"message": f"Session {session_id} cleared successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Session not found")
 
 
 if __name__ == "__main__":

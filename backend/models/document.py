@@ -11,3 +11,20 @@ class DocumentResponse(BaseModel):
     message : str
     timestamp : datetime = datetime.utcnow()
 
+class DocumentUpload(BaseModel):
+    filename: str
+
+class DocumentChunk(BaseModel):
+    chunk_id: str
+    content: str
+    metadata: Dict[str, Any]
+    page_number: Optional[int] = None
+
+class DocumentList(BaseModel):
+    documents: List[Dict[str, Any]]
+    total: int
+
+class DocumentDeleteResponse(BaseModel):
+    document_id: str
+    message: str
+    success: bool

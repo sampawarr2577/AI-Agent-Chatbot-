@@ -41,8 +41,11 @@ class DocumentService:
         logger.info(f"Document id generated for the current document: {document_id}")
 
         if file_extension == ".pdf":
+            logger.info("processing pdf file")
             md_text_content = self.process_pdf(temp_file_path)
+            logger.info("completed extracting md text content")
             md_text_content = md_text_content[0].page_content
+            logger.info(f"type of md_text content is {type(md_text_content)}")
             chunks = self.create_text_chunks(md_text_content,document_id,filename)
         elif file_extension == '.docx':
             md_text_content= self.get_markdown(temp_file_path)
@@ -106,7 +109,8 @@ class DocumentService:
         """Process pdf to extract markdown text from it"""
         try:
             if self.is_scanned_pdf(file_path):
-                md_text = self.ocr_and_replace_pdf(file_path)
+                updated_file = self.ocr_and_replace_pdf(file_path)
+                md_text = self.get_markdown(updated_file)
             else:
                 md_text = self.get_markdown(file_path)
 
